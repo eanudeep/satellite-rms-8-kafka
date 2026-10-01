@@ -1,0 +1,27 @@
+# Separate Ingress in the monitoring namespace for grafana.rms.local.
+# The Nginx Ingress Controller picks up Ingress objects from ALL namespaces,
+# so this works alongside the satellite.rms.local Ingress in the app namespace.
+# Both share the same Controller pod, Docker port mapping, and NodePort 30080.
+#
+# One-time host setup (add to C:\Windows\System32\drivers\etc\hosts):
+#   127.0.0.1   grafana.rms.local
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: grafana.rms.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana-service
+                port:
+                  number: 3000

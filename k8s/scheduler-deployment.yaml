@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scheduler
+  template:
+    metadata:
+      labels:
+        app: scheduler
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: scheduler
+          image: scheduler-go:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9091
+              name: metrics
+          env:
+            - name: CSS_ADDR
+              value: "css-service:50051"

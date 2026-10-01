@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-collector-config
+  namespace: monitoring
+data:
+  vector.toml: |
+    # Vector Collector — reads pod logs from the node filesystem,
+    # enriches with Kubernetes metadata, publishes to Kafka.
+
+    [sources.kubernetes_logs]
+      type = "kubernetes_logs"
+      # Reads /var/log/pods/ on the node and auto-enriches with
+      # pod namespace, name, container name, and all pod labels.
+
+    [sinks.kafka_out]
+      type          = "kafka"
+      inputs        = ["kubernetes_logs"]
+      bootstrap_servers = "kafka.monitoring.svc.cluster.local:9092"
+      topic         = "loki-logs"
+      encoding.codec = "json"
+      # Each message is a self-contained JSON event with full k8s metadata,
+      # consumed by the vector-forwarder Deployment and forwarded to Loki.

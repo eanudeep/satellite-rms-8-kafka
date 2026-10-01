@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: css-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: css
+  template:
+    metadata:
+      labels:
+        app: css
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: css
+          image: css-go-stateless:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 50051
+              name: grpc
+            - containerPort: 9091
+              name: metrics
+          env:
+            - name: REDIS_ADDR
+              value: "redis-service:6379"

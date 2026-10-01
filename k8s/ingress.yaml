@@ -1,0 +1,62 @@
+# Nginx Ingress — hostname-based routing (the production pattern)
+#
+# Key change from rms-5:
+#   rms-5 had no "host:" field — rules matched any hostname
+#   rms-6 adds "host: satellite.rms.local" — Nginx only routes requests
+#   that arrive with that Host header, which is how production Ingress works.
+#
+# External access setup (one-time, on the Windows host):
+#   1. Add to C:\Windows\System32\drivers\etc\hosts:
+#         127.0.0.1   satellite.rms.local
+#   2. Run in a terminal (keep it running):
+#         minikube tunnel
+#   3. Open browser: http://satellite.rms.local
+#
+# Why this mirrors production:
+#   minikube tunnel = what AWS/GCP/Azure does automatically for LoadBalancer services
+#   /etc/hosts entry = what a real DNS A record does in production
+#   Everything else (Ingress rules, routing, services) is identical to cloud deployment.
+#
+# Rate limiting: 5 req/s per IP at gateway level (same as rms-5)
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: satellite-rms-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: "5"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: satellite.rms.local
+      http:
+        paths:
+          # Route 1: Authentication endpoint
+          # POST /auth/login  →  auth-service:8081
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 8081
+
+          # Route 2: All API endpoints (satellites, schedules, ping)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard-api-service
+                port:
+                  number: 8080
+
+          # Route 3: Browser UI (static files embedded in dashboard-api binary)
+          # Nginx matches /auth and /api first — everything else falls to this catch-all.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard-api-service
+                port:
+                  number: 8080

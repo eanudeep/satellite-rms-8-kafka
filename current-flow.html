@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>satellite-rms-8-kafka — Current Flow</title>
+<style>
+  body {
+    margin: 0;
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 32px 40px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  h1 {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: #e6edf3;
+    margin: 0 0 4px 0;
+  }
+  h2 {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    color: #8b949e;
+    margin: 0 0 28px 0;
+  }
+  pre {
+    margin: 0;
+    white-space: pre;
+    color: #e6edf3;
+  }
+  .section-title {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #8b949e;
+    margin: 36px 0 14px 0;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #21262d;
+    margin: 32px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>satellite-rms-8-kafka &mdash; Current Architecture Flow</h1>
+<h2>Full end-to-end pipeline &middot; metrics (PULL) &middot; logs (buffered PUSH via Kafka)</h2>
+
+<pre>
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║  WINDOWS HOST                                                                                        ║
+║  Browser  ──────────────────────────────────────────── http://grafana.rms.local                      ║
+╚══════════════════════════════════════════╦═══════════════════════════════════════════════════════════╝
+                                           │  port 80  (Minikube NodePort 30080)
+╔══════════════════════════════════════════╩═══════════════════════════════════════════════════════════╗
+║  KUBERNETES CLUSTER (Minikube)           │                                                           ║
+║                              ┌───────────▼───────────┐                                               ║
+║                              │    Nginx Ingress      │                                               ║
+║                              │   (Controller POD)    │                                               ║
+║                              │   grafana.rms.local   │                                               ║
+║                              └───────────┬───────────┘                                               ║
+║                                          │                                                           ║
+║  ┌───────────────────────────────────────┼──────────────────────────────────────────────────┐        ║
+║  │  Namespace: monitoring                │                                                  │        ║
+║  │                                       ▼                                                  │        ║
+║  │                             ┌─────────────────────┐                                      │        ║
+║  │       ┌───── PromQL ────────│                     │───── LogQL ──────┐                   │        ║
+║  │       │                     │   G R A F A N A     │                  │                   │        ║
+║  │       │                     │        :3000        │                  │                   │        ║
+║  │       ▼                     └─────────────────────┘                  ▼                   │        ║
+║  │  ┌────────────┐               (datasources pre-         ┌────────────────────┐           │        ║
+║  │  │ PROMETHEUS │                provisioned via          │      L O K I       │           │        ║
+║  │  │   :9090    │                ConfigMap)               │       :3100        │           │        ║
+║  │  │            │                                         │  log store         │           │        ║
+║  │  │ time-series│                                         │  (chunks / index)  │           │        ║
+║  │  │  database  │                                         └─────────▲──────────┘           │        ║
+║  │  └──────┬─────┘                                                   │                     │        ║
+║  │         │ GET /metrics                                HTTP POST   │                     │        ║
+║  │         │ every 15s  (PULL)                            (PUSH)     │                     │        ║
+║  │         │                                     ┌────────┴──────────────────┐             │        ║
+║  │         │                                     │   VECTOR FORWARDER        │             │        ║
+║  │         │                                     │   Deployment              │             │        ║
+║  │         │                                     │   source : kafka          │             │        ║
+║  │         │                                     │   sink   : loki           │             │        ║
+║  │         │                                     └────────▲──────────────────┘             │        ║
+║  │         │                                              │                                │        ║
+║  │         │                                        consume│  (group: vector-loki-forwarder)│        ║
+║  │         │                                     ┌────────┴──────────────────┐             │        ║
+║  │         │                                     │     K  A  F  K  A         │             │        ║
+║  │         │                                     │   topic  : loki-logs      │             │        ║
+║  │         │                                     │   KRaft  (no Zookeeper)   │             │        ║
+║  │         │                                     │   retention : 1 hour      │             │        ║
+║  │         │                                     └────────▲──────────────────┘             │        ║
+║  │         │                                              │                                │        ║
+║  │         │                                        produce│  (JSON events)                │        ║
+║  │         │                                     ┌────────┴──────────────────┐             │        ║
+║  │         │                                     │   VECTOR COLLECTOR        │             │        ║
+║  │         │                                     │   DaemonSet               │             │        ║
+║  │         │                                     │   source : kubernetes     │             │        ║
+║  │         │                                     │              _logs        │             │        ║
+║  │         │                                     │   sink   : kafka          │             │        ║
+║  │         │                                     └────────┬──────────────────┘             │        ║
+║  └─────────┼──────────────────────────────────────────────┼───────────────────────────────┘        ║
+║            │                                              │  reads Container Logs                   ║
+║            │  scrapes pod IP:port/metrics                 │  (/var/log/pods/)                        ║
+║            │  (discovered via k8s API                     │  (hostPath mount                         ║
+║            │   + prometheus.io annotations)               │   on Minikube node)                      ║
+║            │                                              │                                          ║
+║  ┌─────────┼──────────────────────────────────────────────┼────────────────────────────────────┐     ║
+║  │  Namespace: satellite-rms-8-kafka                      │                                    │     ║
+║  │                                                        │                                    │     ║
+║  │  ┌─────────────────────────────────────────────────────┼────────────────────────────────┐   │     ║
+║  │  │  Minikube Node filesystem                           │                                │   │     ║
+║  │  │                                   /var/log/pods/    │                                │   │     ║
+║  │  │  dashboard-api stdout ──────────► ...dashboard-api/0.log ◄──────────────────────────┘   │     ║
+║  │  │  auth-service  stdout ──────────► ...auth-service/0.log                                 │     ║
+║  │  │  css           stdout ──────────► ...css/0.log                                          │     ║
+║  │  │  scheduler     stdout ──────────► ...scheduler/0.log                   containerd       │     ║
+║  │  │  telemetry     stdout ──────────► ...telemetry/0.log                   writes all       │     ║
+║  │  │              (containerd intercepts stdout and writes here)             stdout here     │     ║
+║  │  └────────────────────────────────────────────────────────────────────────────────────┘   │     ║
+║  │                                                                                           │     ║
+║  │  ┌─────────────────────┐   ┌──────────────────────┐   ┌──────────────────────────────┐   │     ║
+║  │  │   dashboard-api     │   │    auth-service      │   │  css / scheduler / telemetry │   │     ║
+║  │  │      :8080          │   │       :8081          │   │           :9091              │   │     ║
+║  │  │                     │   │                      │   │  (separate metrics server)   │   │     ║
+║  │  │  promauto registers │   │  promauto registers  │   │  promauto registers          │   │     ║
+║  │  │  metrics in memory  │   │  metrics in memory   │   │  metrics in memory           │   │     ║
+║  │  │         │           │   │         │            │   │         │                    │   │     ║
+║  │  │         ▼           │   │         ▼            │   │         ▼                    │   │     ║
+║  │  │  ┌─────────────┐    │   │  ┌─────────────┐    │   │  ┌─────────────┐             │   │     ║
+║  │  │  │  /metrics   │◄───┼───┼──│  /metrics   │◄───┼───┼──│  /metrics   │◄────────────┼───┼── ◄── Prometheus
+║  │  │  │  endpoint   │    │   │  │  endpoint   │    │   │  │  endpoint   │             │   │     ║
+║  │  │  │ (promhttp)  │    │   │  │ (promhttp)  │    │   │  │ (promhttp)  │             │   │     ║
+║  │  │  └─────────────┘    │   │  └─────────────┘    │   │  └─────────────┘             │   │     ║
+║  │  │                     │   │                      │   │                              │   │     ║
+║  │  │  fmt.Printf()  ─────┼───┼──────────────────────┼───┼──────── stdout ──────────────┼───┼──► /var/log/pods/
+║  │  └─────────────────────┘   └──────────────────────┘   └──────────────────────────────┘   │     ║
+║  │                                                                                           │     ║
+║  │  Annotations on every pod:                                                                │     ║
+║  │  prometheus.io/scrape: "true"     ←  Prometheus keeps this pod in its scrape list        │     ║
+║  │  prometheus.io/port:   "8080"     ←  Prometheus uses this port for the GET request       │     ║
+║  │  prometheus.io/path:   "/metrics" ←  Prometheus calls this path                          │     ║
+║  └───────────────────────────────────────────────────────────────────────────────────────────┘     ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════════════╝
+</pre>
+
+<hr>
+
+<div class="section-title">Metrics Flow &mdash; follow the left arrows &nbsp; (PULL model)</div>
+
+<pre>
+promauto.Inc()  /  promauto.NewGauge()  /  promauto.NewHistogram()
+    │
+    ▼  (numbers sit in RAM inside the Go process)
+in-memory Prometheus registry
+    │
+    ▼  (promhttp.Handler() serialises the registry on demand)
+GET /metrics endpoint  ◄──────  Prometheus scrapes every 15 s
+                                │
+                                ▼
+                         Prometheus TSDB  (time-series storage)
+                                │
+                                ▼  (PromQL query from browser)
+                             Grafana  ──►  Browser
+</pre>
+
+<hr>
+
+<div class="section-title">Logs Flow &mdash; follow the right arrows &nbsp; (buffered PUSH model)</div>
+
+<pre>
+fmt.Printf("...")  /  log.Println()
+    │
+    ▼  (containerd intercepts stdout of every pod)
+/var/log/pods/.../0.log  on the Minikube node filesystem
+    │
+    ▼  (Vector Collector tails files continuously — DaemonSet, one pod per node, hostPath mount)
+Vector Collector enriches each log line with Kubernetes metadata
+    (pod namespace, pod name, container name, all pod labels)
+    │
+    ▼  (Kafka produce — one JSON event per log line, topic "loki-logs")
+Kafka broker  (KRaft — no Zookeeper, single node, 1 h retention)
+    │           messages survive here if Loki or the Forwarder restarts
+    ▼  (Kafka consume — consumer group: vector-loki-forwarder, offset: latest)
+Vector Forwarder extracts labels via VRL remap transform
+    (namespace, pod, container, app, pipeline=kafka)
+    │
+    ▼  (HTTP POST /loki/api/v1/push)
+Loki  (stores log lines indexed by labels)
+    │
+    ▼  (LogQL query from browser)
+Grafana  ──►  Browser
+</pre>
+
+<hr>
+
+<div class="section-title">The Key Structural Difference vs rms-7</div>
+
+<pre>
+rms-7  (Promtail, direct push):
+
+  /var/log/pods/
+      │
+      ▼
+  Promtail (DaemonSet)  ──────────────────────────────►  Loki
+                             HTTP POST (synchronous)
+
+  If Loki is restarting or slow, Promtail's push fails and
+  those log lines are lost.
+
+
+rms-8  (Vector + Kafka, buffered push):
+
+  /var/log/pods/
+      │
+      ▼
+  Vector Collector (DaemonSet)  ──►  Kafka (topic: loki-logs)
+                                         │
+                                         │  messages durable for 1 h
+                                         │
+                                         ▼
+                              Vector Forwarder (Deployment)  ──►  Loki
+                                                   HTTP POST
+
+  Kafka acts as a durable buffer.  A Loki restart does not drop logs —
+  they accumulate in the topic and are forwarded once Loki recovers.
+  The Forwarder's consumer group offset ensures each message is
+  delivered exactly once.
+</pre>
+
+</body>
+</html>

@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-forwarder-config
+  namespace: monitoring
+data:
+  vector.toml: |
+    # Vector Forwarder — consumes JSON log events from Kafka,
+    # shapes the labels, and pushes to Loki's HTTP ingest API.
+
+    [sources.kafka_in]
+      type              = "kafka"
+      bootstrap_servers = "kafka.monitoring.svc.cluster.local:9092"
+      topics            = ["loki-logs"]
+      group_id          = "vector-loki-forwarder"
+      decoding.codec    = "json"
+      # Start from the latest offset so a forwarder restart does not
+      # re-ingest logs that Loki already has.
+      auto_offset_reset = "latest"
+
+    [transforms.add_loki_labels]
+      type   = "remap"
+      inputs = ["kafka_in"]
+      source = '''
+        # Flatten nested kubernetes metadata to top-level fields
+        # so the Loki sink label template can reference them.
+        .k8s_namespace = .kubernetes.pod_namespace
+        .k8s_pod       = .kubernetes.pod_name
+        .k8s_container = .kubernetes.container_name
+        .k8s_app       = get!(.kubernetes.pod_labels, ["app"])
+      '''
+
+    [sinks.loki]
+      type    = "loki"
+      inputs  = ["add_loki_labels"]
+      endpoint = "http://loki-service.monitoring.svc.cluster.local:3100"
+      encoding.codec = "text"
+
+      [sinks.loki.labels]
+        namespace = "{{ k8s_namespace }}"
+        pod       = "{{ k8s_pod }}"
+        container = "{{ k8s_container }}"
+        app       = "{{ k8s_app }}"
+        # Static label marks these logs as Kafka-brokered so you can
+        # distinguish them from any future direct-push sources.
+        pipeline  = "kafka"

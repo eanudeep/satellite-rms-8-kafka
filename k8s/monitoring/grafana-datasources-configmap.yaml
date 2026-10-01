@@ -1,0 +1,23 @@
+# Grafana reads this ConfigMap at startup to auto-provision both data sources.
+# No manual configuration needed — Prometheus and Loki are wired up automatically.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-service.monitoring.svc.cluster.local:9090
+        isDefault: true
+        editable: true
+
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki-service.monitoring.svc.cluster.local:3100
+        editable: true

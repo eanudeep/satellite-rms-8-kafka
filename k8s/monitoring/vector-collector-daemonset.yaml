@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector-collector
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: vector-collector
+  template:
+    metadata:
+      labels:
+        app: vector-collector
+    spec:
+      serviceAccountName: vector-collector
+      tolerations:
+        # Run on every node including control-plane nodes
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vector
+          image: timberio/vector:0.39.0-alpine
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/etc/vector/vector.toml"]
+          env:
+            # Tell Vector which namespace it is running in (used for self-filtering)
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            # Node log directories — Vector reads these to collect pod logs
+            - name: var-log-pods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: var-lib-docker
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            # Vector stores file checkpoints here so it resumes after restarts
+            - name: data-dir
+              mountPath: /vector-data-dir
+      volumes:
+        - name: config
+          configMap:
+            name: vector-collector-config
+        - name: var-log-pods
+          hostPath:
+            path: /var/log/pods
+        - name: var-lib-docker
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: data-dir
+          hostPath:
+            path: /var/lib/vector
+            type: DirectoryOrCreate

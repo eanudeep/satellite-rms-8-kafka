@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vector-forwarder
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vector-forwarder
+  template:
+    metadata:
+      labels:
+        app: vector-forwarder
+    spec:
+      containers:
+        - name: vector
+          image: timberio/vector:0.39.0-alpine
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/etc/vector/vector.toml"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: vector-forwarder-config

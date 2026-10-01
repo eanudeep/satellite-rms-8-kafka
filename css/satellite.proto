@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package satelliterms;
+
+option go_package = "./satelliterms";
+
+service ConstellationStateService {
+  rpc GetPing             (PingRequest)         returns (PingResponse);
+  rpc GetAllEphemeris     (EphemerisRequest)    returns (EphemerisResponse);
+  rpc GetSatellite        (SatelliteRequest)    returns (SatelliteResponse);
+  rpc GetSatelliteHistory (HistoryRequest)      returns (HistoryResponse);
+  rpc ReceiveSchedule     (SchedulePayload)     returns (ScheduleAck);
+  rpc GetSchedules        (ScheduleListRequest) returns (ScheduleListResponse);
+}
+
+message PingRequest  {}
+message PingResponse { string status = 1; }
+
+message EphemerisRequest {}
+message EphemerisResponse {
+  int32  version   = 1;
+  string timestamp = 2;
+  repeated Satellite satellites = 3;
+}
+
+message SatelliteRequest  { string satellite_id = 1; }
+message SatelliteResponse {
+  int32     version   = 1;
+  string    timestamp = 2;
+  Satellite satellite = 3;
+}
+
+message Satellite {
+  string id             = 1;
+  double orbital_angle  = 2;
+  double altitude_km    = 3;
+  string health         = 4;
+  int32  power_budget_w = 5;
+  bool   eclipse        = 6;
+}
+
+message HistoryRequest { string satellite_id = 1; }
+message OrbitSnapshot {
+  string timestamp      = 1;
+  double orbital_angle  = 2;
+  double altitude_km    = 3;
+  string health         = 4;
+  int32  power_budget_w = 5;
+  bool   eclipse        = 6;
+}
+message HistoryResponse {
+  string satellite_id = 1;
+  int32  record_count = 2;
+  int32  limit        = 3;
+  repeated OrbitSnapshot history = 4;
+}
+
+message Timeslot {
+  string timeslot = 1;
+  int32  power_w  = 2;
+}
+
+message Assignment {
+  string satellite_id   = 1;
+  string status         = 2;
+  string reason         = 3;
+  string gateway        = 4;
+  bool   eclipse        = 5;
+  int32  power_budget_w = 6;
+  map<string, Timeslot> cells = 7;
+}
+
+message SchedulePayload {
+  int32  run               = 1;
+  int32  ephemeris_version = 2;
+  string timestamp         = 3;
+  int32  scheduled_count   = 4;
+  int32  skipped_count     = 5;
+  repeated Assignment assignments = 6;
+}
+
+message ScheduleAck {
+  string message = 1;
+  int32  run     = 2;
+}
+
+message ScheduleListRequest {}
+message ScheduleListResponse {
+  int32 total_runs = 1;
+  repeated SchedulePayload schedules = 2;
+}
